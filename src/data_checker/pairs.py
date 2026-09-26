@@ -1,7 +1,25 @@
+import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 
-from data_checker.normalize import core_name, norm
+from data_checker.normalize import PLACE, TIER, core_name, norm
+
+
+def prefix_len(a: str, b: str) -> int:
+    i = 0
+    while i < min(len(a), len(b)) and a[i] == b[i]:
+        i += 1
+    return i
+
+
+def edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
 
 
 def _buckets(names: Iterable[str], key_of) -> dict[str, list[str]]:
@@ -11,9 +29,7 @@ def _buckets(names: Iterable[str], key_of) -> dict[str, list[str]]:
     return buckets
 
 
-def _ranked(
-    groups: list[list[str]], counts: Counter[str]
-) -> list[tuple[str, list[str]]]:
+def _ranked(groups: list[list[str]], counts: Counter[str]) -> list[tuple[str, list[str]]]:
     """每组选出建议写法（频次最高、其次最短），全组按总频次排序"""
     out = [
         (
@@ -40,6 +56,63 @@ def pending_groups(counts: Counter[str]) -> list[tuple[str, list[str]]]:
         if len(key) >= 2:
             buckets.setdefault(key, []).append(name)
     return _ranked(
-        [m for m in buckets.values() if len(m) > 1 and len({norm(n) for n in m}) > 1],
+        [
+            m
+            for m in buckets.values()
+            if len(m) > 1 and len({norm(n) for n in m}) > 1
+        ],
         counts,
     )
+
+
+def candidate_pairs(names: Iterable[str]) -> Iterator[tuple[str, str]]:
+    """按归一化后的首 4 字 / 末 4 字分桶，避免全两两比较"""
+    buckets: dict[str, list[str]] = {}
+    for name in names:
+        key = norm(name)
+        for b in (key[:4], key[-4:]):
+            buckets.setdefault(b, []).append(name)
+
+    seen: set[tuple[str, str]] = set()
+    for bucket in buckets.values():
+        if len(bucket) > 2000:
+            continue
+        for i in range(len(bucket)):
+            for j in range(i + 1, len(bucket)):
+                pair = (bucket[i], bucket[j])
+                if pair not in seen:
+                    seen.add(pair)
+                    yield pair
+
+
+def typo_pairs(
+    counts: Counter[str], max_diff: int, min_hi: int
+) -> list[tuple[str, str]]:
+    """(疑似错字, 建议写法)：差异只落在尾部，且非校区 / 非层级词差异"""
+    out = []
+    for a, b in candidate_pairs(counts):
+        na, nb = norm(a), norm(b)
+        if na == nb:
+            continue
+        if na in nb or nb in na:
+            lo_n, hi_n = (na, nb) if len(na) <= len(nb) else (nb, na)
+            # 多出来的部分若只是尾部的重复（「XX大学大学」）→ 冗余，仍算错字
+            if not lo_n.endswith(hi_n[len(lo_n) :]):
+                continue
+        if abs(len(na) - len(nb)) > 1:
+            continue
+
+        cp = prefix_len(na, nb)
+        if cp < 4 or cp < 0.6 * min(len(na), len(nb)):
+            continue
+        tail = na[cp:] + nb[cp:]
+        if PLACE.search(tail) or TIER.search(tail):
+            continue
+        if edit_distance(na[cp:], nb[cp:]) > max_diff:
+            continue
+
+        lo, hi = (a, b) if counts[a] <= counts[b] else (b, a)
+        if counts[lo] <= 2 and counts[hi] >= min_hi:
+            out.append((lo, hi))
+    out.sort(key=lambda p: (-counts[p[1]], -counts[p[0]]))
+    return out

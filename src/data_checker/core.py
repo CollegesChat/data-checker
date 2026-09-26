@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import click
 from uniinfo_editor import register_plugin
 
-from data_checker.pairs import merge_groups, pending_groups
+from data_checker.pairs import merge_groups, pending_groups, typo_pairs
 from data_checker.render import render, render_groups
 from data_checker.rules import joke_rule, level_rule
 
@@ -51,9 +51,7 @@ def scan(
     return counts, rules, ids
 
 
-def name_stats(
-    rows: list[tuple[str, str]],
-) -> tuple[Counter[str], dict[str, list[str]]]:
+def name_stats(rows: list[tuple[str, str]]) -> tuple[Counter[str], dict[str, list[str]]]:
     counts: Counter[str] = Counter()
     ids: dict[str, list[str]] = {}
     for id_, name in rows:
@@ -166,15 +164,46 @@ def check_merge(tui: UniInfoTUI, limit: int, verbose: bool, pending: bool) -> No
 
 
 @check_group.command(name='typo')
-@click.option('--threshold', type=float, default=0.8, help='相似度阈值 (默认 0.8)')
+@click.option(
+    '--max-diff', type=int, default=2, metavar='N', help='尾部差异字数上限 (默认 2)'
+)
+@click.option(
+    '--min-hi', type=int, default=8, metavar='N', help='正确写法的最低出现次数 (默认 8)'
+)
+@click.option(
+    '--limit',
+    type=int,
+    default=20,
+    metavar='N',
+    help='展示条数上限 (默认 20，0 为不限)',
+)
+@click.option('--verbose', is_flag=True, help='列出命中的全部答题 ID')
 @click.pass_obj
-def check_typo(tui: UniInfoTUI, threshold: float) -> None:
-    """基于阈值距离筛查名称错别字"""
+def check_typo(
+    tui: UniInfoTUI, max_diff: int, min_hi: int, limit: int, verbose: bool
+) -> None:
+    """筛查错别字写法（差异只落在尾部，且明显少于正确写法）"""
     rows = school_rows(tui)
     if rows is None:
         return
+
+    counts, ids = name_stats(rows)
+    pairs = typo_pairs(counts, max_diff, min_hi)
+    if not pairs:
+        logger.info(f'🎉 未发现疑似错别字 ({tui.mode}，样本 {len(rows)} 条)')
+        return
+
+    wrong: Counter[str] = Counter()
+    suggest: dict[str, str] = {}
+    for lo, hi in pairs:
+        wrong[lo] = counts[lo]
+        suggest.setdefault(lo, hi)
+
     logger.info(
-        f'🔍 正在以相似度 {threshold} 筛查错别字名称... ({tui.mode}，样本 {len(rows)} 条)'
+        f'🔍 命中 {len(pairs)} 对 / {len(wrong)} 个校名 ({tui.mode}，样本 {len(rows)} 条)'
+    )
+    render(
+        '✏️ 疑似错别字', wrong, suggest, ids, limit, verbose, rule_header='建议写法'
     )
 
 
