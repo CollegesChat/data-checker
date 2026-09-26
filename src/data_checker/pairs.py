@@ -4,13 +4,30 @@ from collections.abc import Iterable, Iterator
 from functools import lru_cache
 
 from pypinyin import lazy_pinyin
+from hanzi_chaizi import HanziChaizi
 
 from data_checker.normalize import PLACE, TIER, core_name, norm
+
+_CHAIZI = HanziChaizi()
 
 
 @lru_cache(maxsize=None)
 def pinyin_of(name: str) -> tuple[str, ...]:
     return tuple(lazy_pinyin(name))
+
+
+@lru_cache(maxsize=None)
+def parts_of(char: str) -> frozenset[str]:
+    """字的部件（含字本身）；查不到时退化为只有字本身"""
+    return frozenset([char] + (_CHAIZI.query(char) or []))
+
+
+def char_doc_freq(counts: Counter[str]) -> Counter[str]:
+    """每个字出现在多少个不同校名里：用来判定「罕见字」"""
+    freq: Counter[str] = Counter()
+    for name in counts:
+        freq.update(set(norm(name)))
+    return freq
 
 
 def prefix_len(a: str, b: str) -> int:
@@ -105,20 +122,34 @@ def typo_pairs(
     group: Counter[str] = Counter()
     for name, c in counts.items():
         group[norm(name)] += c
+    rare = char_doc_freq(counts)
 
     for a, b in candidate_pairs(counts):
         na, nb = norm(a), norm(b)
         if na == nb:
             continue
 
-        lo, hi = (a, b) if group[na] <= group[nb] else (b, a)
-        if group[norm(lo)] > 2 or group[norm(hi)] < min_hi:
+        if group[na] <= group[nb]:
+            lo, hi, lo_s, hi_s = a, b, na, nb
+        else:
+            lo, hi, lo_s, hi_s = b, a, nb, na
+        if group[lo_s] > 2 or group[hi_s] < min_hi:
             continue
 
         # 等长且整串同音：山西/陕西、福州/抚州 这类地名与虚词错误
         if len(na) == len(nb) and pinyin_of(na) == pinyin_of(nb):
             out.append((lo, hi, '同音'))
             continue
+
+        # 单字替换，且低频侧用到罕见字、高频侧是常用字：囗/口 这类形近错字
+        if len(na) == len(nb):
+            diff = [i for i in range(len(na)) if na[i] != nb[i]]
+            if len(diff) == 1:
+                i = diff[0]
+                x, y = lo_s[i], hi_s[i]
+                if rare[x] <= 1 < rare[y] and parts_of(x) & parts_of(y):
+                    out.append((lo, hi, '形近'))
+                    continue
 
         if na in nb or nb in na:
             lo_n, hi_n = (na, nb) if len(na) <= len(nb) else (nb, na)
