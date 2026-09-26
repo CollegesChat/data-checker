@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING
 import click
 from uniinfo_editor import register_plugin
 
-from data_checker.render import render
+from data_checker.pairs import merge_groups, pending_groups
+from data_checker.render import render, render_groups
 from data_checker.rules import joke_rule, level_rule
 
 if TYPE_CHECKING:
@@ -48,6 +49,17 @@ def scan(
         rules.setdefault(name, rule)
         ids.setdefault(name, []).append(id_)
     return counts, rules, ids
+
+
+def name_stats(
+    rows: list[tuple[str, str]],
+) -> tuple[Counter[str], dict[str, list[str]]]:
+    counts: Counter[str] = Counter()
+    ids: dict[str, list[str]] = {}
+    for id_, name in rows:
+        counts[name] += 1
+        ids.setdefault(name, []).append(id_)
+    return counts, ids
 
 
 # =====================================================================
@@ -114,13 +126,43 @@ def check_school(tui: UniInfoTUI, limit: int, verbose: bool) -> None:
 
 
 @check_group.command(name='merge')
+@click.option(
+    '--limit',
+    type=int,
+    default=20,
+    metavar='N',
+    help='展示组数上限 (默认 20，0 为不限)',
+)
+@click.option('--verbose', is_flag=True, help='列出命中的全部答题 ID')
+@click.option('--pending', is_flag=True, help='额外列出需人工确认的疑似同校写法')
 @click.pass_obj
-def check_merge(tui: UniInfoTUI) -> None:
-    """分析数据中可合并的潜在相似大学名称"""
+def check_merge(tui: UniInfoTUI, limit: int, verbose: bool, pending: bool) -> None:
+    """归并同一学校的不同写法（校区、括号、繁简、空白）"""
     rows = school_rows(tui)
     if rows is None:
         return
-    logger.info(f'🔍 正在分析可合并的大学名称... ({tui.mode}，样本 {len(rows)} 条)')
+
+    counts, ids = name_stats(rows)
+    groups = merge_groups(counts)
+    if not groups:
+        logger.info(f'🎉 未发现可归并的写法 ({tui.mode}，样本 {len(rows)} 条)')
+        return
+
+    total = sum(len(m) for _, m in groups)
+    logger.info(
+        f'🔍 命中 {len(groups)} 组 / {total} 个校名 ({tui.mode}，样本 {len(rows)} 条)'
+    )
+    render_groups(
+        '🔀 可归并的写法（括号内为出现次数）', groups, counts, ids, limit, verbose
+    )
+
+    if pending:
+        rest = pending_groups(counts)
+        if rest:
+            logger.info(f'⚠️ 另有 {len(rest)} 组疑似同校，需人工确认：')
+            render_groups(
+                '❓ 疑似同校（仅提示，不自动合并）', rest, counts, ids, limit, verbose
+            )
 
 
 @check_group.command(name='typo')
