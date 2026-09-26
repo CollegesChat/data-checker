@@ -195,15 +195,24 @@ def check_typo(
 
     wrong: Counter[str] = Counter()
     suggest: dict[str, str] = {}
-    for lo, hi in pairs:
+    kinds: dict[str, str] = {}
+    for lo, hi, kind in pairs:
         wrong[lo] = counts[lo]
         suggest.setdefault(lo, hi)
+        kinds.setdefault(lo, kind)
 
     logger.info(
         f'🔍 命中 {len(pairs)} 对 / {len(wrong)} 个校名 ({tui.mode}，样本 {len(rows)} 条)'
     )
     render(
-        '✏️ 疑似错别字', wrong, suggest, ids, limit, verbose, rule_header='建议写法'
+        '✏️ 疑似错别字',
+        wrong,
+        suggest,
+        ids,
+        limit,
+        verbose,
+        rule_header='建议写法',
+        kinds=kinds,
     )
 
 

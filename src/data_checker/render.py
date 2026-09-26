@@ -15,8 +15,9 @@ def render(
     limit: int,
     verbose: bool,
     rule_header: str = '规则',
+    kinds: dict[str, str] | None = None,
 ) -> None:
-    """逐校名一行：学校名 / 次数 / 规则 / 样例 ID"""
+    """逐校名一行：学校名 / 次数 / 规则 / (类型) / 样例 ID"""
     ordered = sorted(counts, key=lambda n: (-counts[n], n))
     shown = ordered if limit == 0 else ordered[:limit]
 
@@ -26,10 +27,16 @@ def render(
     )
     table.add_column('次数', justify='right')
     table.add_column(rule_header)
+    if kinds is not None:
+        table.add_column('类型')
     table.add_column('样例 ID', style='dim')
     for name in shown:
         sample = ids[name] if verbose else ids[name][:3]
-        table.add_row(name, str(counts[name]), rules[name], ' '.join(sample))
+        row = [name, str(counts[name]), rules[name]]
+        if kinds is not None:
+            row.append(kinds.get(name, ''))
+        row.append(' '.join(sample))
+        table.add_row(*row)
     Console().print(table)
 
     if len(shown) < len(ordered):
