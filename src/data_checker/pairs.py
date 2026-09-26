@@ -111,11 +111,14 @@ def candidate_pairs(names: Iterable[str]) -> Iterator[tuple[str, str]]:
 
 
 def typo_pairs(
-    counts: Counter[str], max_diff: int, min_hi: int
+    counts: Counter[str], max_diff: int, min_hi: int, rare_df: int = 1
 ) -> list[tuple[str, str, str]]:
     """(疑似错字, 建议写法, 类型)
 
-    类型：同音（拼音序列相同，字形不同）/ 尾部差异（字形大部分相同，只有尾部小差异）
+    类型：同音（拼音序列相同，字形不同）/ 形近（换成罕见字）
+    / 尾部差异（字形大部分相同，只有尾部小差异）
+
+    rare_df：字出现在不超过 rare_df 个校名里就算罕见字
     """
     out = []
     # 同一学校可能有多种写法，比较热度要用「归一化后整组」的频次
@@ -147,7 +150,7 @@ def typo_pairs(
             if len(diff) == 1:
                 i = diff[0]
                 x, y = lo_s[i], hi_s[i]
-                if rare[x] <= 1 < rare[y] and parts_of(x) & parts_of(y):
+                if rare[x] <= rare_df < rare[y] and parts_of(x) & parts_of(y):
                     out.append((lo, hi, '形近'))
                     continue
 

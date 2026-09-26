@@ -171,6 +171,13 @@ def check_merge(tui: UniInfoTUI, limit: int, verbose: bool, pending: bool) -> No
     '--min-hi', type=int, default=8, metavar='N', help='正确写法的最低出现次数 (默认 8)'
 )
 @click.option(
+    '--rare-df',
+    type=int,
+    default=1,
+    metavar='N',
+    help='形近判定：出现在不超过 N 个校名里的字算罕见字 (默认 1)',
+)
+@click.option(
     '--limit',
     type=int,
     default=20,
@@ -180,15 +187,15 @@ def check_merge(tui: UniInfoTUI, limit: int, verbose: bool, pending: bool) -> No
 @click.option('--verbose', is_flag=True, help='列出命中的全部答题 ID')
 @click.pass_obj
 def check_typo(
-    tui: UniInfoTUI, max_diff: int, min_hi: int, limit: int, verbose: bool
+    tui: UniInfoTUI, max_diff: int, min_hi: int, rare_df: int, limit: int, verbose: bool
 ) -> None:
-    """筛查错别字写法（差异只落在尾部，且明显少于正确写法）"""
+    """筛查错别字写法（同音替换、形近罕见字、尾部小差异）"""
     rows = school_rows(tui)
     if rows is None:
         return
 
     counts, ids = name_stats(rows)
-    pairs = typo_pairs(counts, max_diff, min_hi)
+    pairs = typo_pairs(counts, max_diff, min_hi, rare_df)
     if not pairs:
         logger.info(f'🎉 未发现疑似错别字 ({tui.mode}，样本 {len(rows)} 条)')
         return
